@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { RoleplayResult } from "@/lib/types";
 
 const C = {
@@ -31,63 +31,96 @@ function scoreColor(s: number) {
   return s >= 85 ? C.pink : s >= 75 ? C.gold : s >= 60 ? C.sky : C.gray;
 }
 
+// 一覧レコード (transcript なし)
+type ResultSummary = Omit<RoleplayResult, "transcript">;
+
+interface PageData {
+  data: ResultSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 interface StaffStats {
   name: string;
   avg: number;
   count: number;
 }
 
+const PAGE_SIZE = 20;
+
 export default function AdminPage() {
   const [password, setPassword] = useState("");
   const [authed, setAuthed] = useState(false);
+  const [storedPassword, setStoredPassword] = useState("");
   const [authError, setAuthError] = useState("");
-  const [results, setResults] = useState<RoleplayResult[]>([]);
+  const [pageData, setPageData] = useState<PageData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<RoleplayResult | null>(null);
   const [filterName, setFilterName] = useState("");
+  const [selected, setSelected] = useState<RoleplayResult | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  async function login() {
+  async function fetchPage(pw: string, offset: number) {
     setLoading(true);
-    setAuthError("");
     try {
-      const res = await fetch("/api/admin/results", {
-        headers: { "x-admin-password": password },
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String(offset),
+      });
+      const res = await fetch(`/api/admin/results?${params}`, {
+        headers: { "x-admin-password": pw },
       });
       if (res.status === 401) {
         setAuthError("パスワードが違います");
         setLoading(false);
-        return;
+        return false;
       }
-      const data = await res.json();
-      setResults(data);
-      setAuthed(true);
+      const json: PageData = await res.json();
+      setPageData(json);
+      return true;
     } catch {
       setAuthError("通信エラーが発生しました");
+      return false;
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
-  async function refreshResults() {
+  async function login() {
     setLoading(true);
+    setAuthError("");
+    const ok = await fetchPage(password, 0);
+    if (ok) {
+      setStoredPassword(password);
+      setAuthed(true);
+    }
+  }
+
+  async function openDetail(id: string) {
+    setDetailLoading(true);
     try {
-      const res = await fetch("/api/admin/results", {
-        headers: { "x-admin-password": password },
+      const res = await fetch(`/api/admin/results/${id}`, {
+        headers: { "x-admin-password": storedPassword },
       });
-      const data = await res.json();
-      setResults(data);
+      if (res.ok) {
+        const detail: RoleplayResult = await res.json();
+        setSelected(detail);
+      }
     } catch {
       // silent
+    } finally {
+      setDetailLoading(false);
     }
-    setLoading(false);
   }
 
+  const allResults = pageData?.data ?? [];
   const filtered = filterName
-    ? results.filter((r) => r.staff_name.includes(filterName))
-    : results;
+    ? allResults.filter((r) => r.staff_name.includes(filterName))
+    : allResults;
 
   const staffStats: StaffStats[] = (() => {
     const map = new Map<string, number[]>();
-    for (const r of results) {
+    for (const r of allResults) {
       if (!map.has(r.staff_name)) map.set(r.staff_name, []);
       map.get(r.staff_name)!.push(r.score);
     }
@@ -99,6 +132,11 @@ export default function AdminPage() {
       }))
       .sort((a, b) => b.avg - a.avg);
   })();
+
+  const currentOffset = pageData?.offset ?? 0;
+  const total = pageData?.total ?? 0;
+  const hasPrev = currentOffset > 0;
+  const hasNext = currentOffset + PAGE_SIZE < total;
 
   if (!authed) {
     return (
@@ -152,17 +190,13 @@ export default function AdminPage() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={refreshResults}
+              onClick={() => fetchPage(storedPassword, 0)}
               className="text-xs font-bold px-3 py-2 rounded-xl"
               style={cardStyle({ borderRadius: 14, boxShadow: `3px 3px 0 ${C.ink}` })}
             >
               🔄 更新
             </button>
-            <a
-              href="/"
-              className="text-xs font-bold px-3 py-2 rounded-xl"
-              style={cardStyle({ borderRadius: 14, boxShadow: `3px 3px 0 ${C.ink}` })}
-            >
+            <a href="/" className="text-xs font-bold px-3 py-2 rounded-xl" style={cardStyle({ borderRadius: 14, boxShadow: `3px 3px 0 ${C.ink}` })}>
               🏠 道場
             </a>
           </div>
@@ -172,7 +206,7 @@ export default function AdminPage() {
       <main className="px-4 max-w-3xl mx-auto space-y-6">
         {/* スタッフ別平均点 */}
         <section>
-          <h2 className="pop-display text-base mb-3">🏆 スタッフ別平均点</h2>
+          <h2 className="pop-display text-base mb-3">🏆 スタッフ別平均点（表示中 {allResults.length} 件）</h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {staffStats.map((s) => (
               <div key={s.name} className="p-3 text-center" style={cardStyle({ borderRadius: 16 })}>
@@ -193,6 +227,7 @@ export default function AdminPage() {
         <section>
           <div className="flex items-center gap-3 mb-3">
             <h2 className="pop-display text-base">📋 成績一覧</h2>
+            <span className="text-xs font-bold" style={{ color: C.gray }}>全{total}件</span>
             <input
               value={filterName}
               onChange={(e) => setFilterName(e.target.value)}
@@ -201,33 +236,68 @@ export default function AdminPage() {
               style={cardStyle({ borderRadius: 12, boxShadow: `2px 2px 0 ${C.ink}` })}
             />
           </div>
+
           <div className="space-y-2">
             {filtered.map((r) => (
               <button
                 key={r.id}
-                onClick={() => setSelected(r)}
+                onClick={() => openDetail(r.id)}
                 className="w-full text-left p-3 transition-all active:translate-y-0.5"
                 style={cardStyle({ borderRadius: 16 })}
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div>
-                      <div className="text-sm font-extrabold">{r.staff_name}</div>
-                      <div className="text-xs font-bold mt-0.5" style={{ color: C.gray }}>
-                        {r.scenario_label}{r.is_random ? " 🎲" : ""} · {new Date(r.created_at).toLocaleDateString("ja-JP")}
-                      </div>
+                  <div>
+                    <div className="text-sm font-extrabold">{r.staff_name}</div>
+                    <div className="text-xs font-bold mt-0.5" style={{ color: C.gray }}>
+                      {r.scenario_label}{r.is_random ? " 🎲" : ""} · {new Date(r.created_at).toLocaleDateString("ja-JP")}
                     </div>
                   </div>
-                  <div className="pop-display text-2xl" style={{ color: scoreColor(r.score) }}>{r.score}</div>
+                  <div className="flex items-center gap-2">
+                    {detailLoading && <span className="text-xs" style={{ color: C.gray }}>…</span>}
+                    <div className="pop-display text-2xl" style={{ color: scoreColor(r.score) }}>{r.score}</div>
+                  </div>
                 </div>
               </button>
             ))}
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !loading && (
               <div className="p-5 text-center" style={cardStyle()}>
                 <p className="text-sm font-bold" style={{ color: C.gray }}>該当する記録がありません</p>
               </div>
             )}
           </div>
+
+          {/* ページネーション */}
+          {(hasPrev || hasNext) && (
+            <div className="flex gap-3 mt-4 justify-center">
+              <button
+                onClick={() => fetchPage(storedPassword, currentOffset - PAGE_SIZE)}
+                disabled={!hasPrev || loading}
+                className="px-4 py-2 text-sm font-bold rounded-xl"
+                style={cardStyle({
+                  borderRadius: 14,
+                  background: hasPrev && !loading ? C.white : "#E5DCCB",
+                  boxShadow: `3px 3px 0 ${C.ink}`,
+                })}
+              >
+                ← 前のページ
+              </button>
+              <span className="flex items-center text-xs font-bold" style={{ color: C.gray }}>
+                {currentOffset + 1}–{Math.min(currentOffset + PAGE_SIZE, total)} / {total}件
+              </span>
+              <button
+                onClick={() => fetchPage(storedPassword, currentOffset + PAGE_SIZE)}
+                disabled={!hasNext || loading}
+                className="px-4 py-2 text-sm font-bold rounded-xl"
+                style={cardStyle({
+                  borderRadius: 14,
+                  background: hasNext && !loading ? C.white : "#E5DCCB",
+                  boxShadow: `3px 3px 0 ${C.ink}`,
+                })}
+              >
+                次のページ →
+              </button>
+            </div>
+          )}
         </section>
       </main>
 
@@ -253,12 +323,13 @@ export default function AdminPage() {
               <div className="pop-display text-4xl" style={{ color: scoreColor(selected.score) }}>{selected.score}</div>
             </div>
 
-            {/* 採点詳細 */}
             <div className="p-3 mb-3 rounded-2xl" style={{ background: C.greenSoft, border: `2px solid ${C.ink}` }}>
               <h4 className="pop-display text-sm mb-2" style={{ color: "#1E8A5C" }}>🌟 よかったところ</h4>
               <ul className="text-xs font-bold space-y-1">
                 {selected.highlights?.map((h, i) => <li key={i}>{h}</li>)}
-                {(!selected.highlights || selected.highlights.length === 0) && <li style={{ color: C.gray }}>記録なし</li>}
+                {(!selected.highlights || selected.highlights.length === 0) && (
+                  <li style={{ color: C.gray }}>記録なし</li>
+                )}
               </ul>
             </div>
 
@@ -279,9 +350,8 @@ export default function AdminPage() {
               </ul>
             </div>
 
-            {/* 会話ログ */}
-            <div className="p-3 rounded-2xl mb-4" style={{ background: C.skySoft, border: `2px solid ${C.ink}` }}>
-              <h4 className="pop-display text-sm mb-2" style={{ color: "#1B6FB0" }}>💬 会話ログ</h4>
+            <div className="p-3 rounded-2xl mb-4" style={{ background: "#FAFAFA", border: `2px solid ${C.ink}` }}>
+              <h4 className="pop-display text-sm mb-2">💬 会話ログ</h4>
               <div className="space-y-2">
                 {selected.transcript?.map((m, i) => (
                   <div key={i} className={`flex ${m.role === "staff" ? "justify-end" : "justify-start"}`}>

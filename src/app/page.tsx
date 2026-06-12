@@ -70,7 +70,11 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-function ScenarioCard({ s, onStart, gold }: { s: { id: string; emoji: string; label: string; desc: string }; onStart: (id: string) => void; gold?: boolean }) {
+function ScenarioCard({ s, onStart, gold }: {
+  s: { id: string; emoji: string; label: string; desc: string };
+  onStart: (id: string) => void;
+  gold?: boolean;
+}) {
   return (
     <button
       onClick={() => onStart(s.id)}
@@ -121,50 +125,9 @@ export default function SalesDojo() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || "API error");
+      throw new Error((err as { error?: string }).error || "API error");
     }
     return res.json();
-  }
-
-  async function saveResult(data: {
-    staff_name: string;
-    scenario_id: string;
-    scenario_label: string;
-    category: string;
-    is_random: boolean;
-    score: number;
-    highlights: string[];
-    deductions: Scoring["deductions"];
-    summary: string;
-    transcript: Message[];
-  }) {
-    try {
-      const res = await fetch("/api/results", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        setSavedResultId(json.id);
-        return json.id as string;
-      }
-    } catch {
-      // 保存失敗は silent
-    }
-    return null;
-  }
-
-  async function updateScore(id: string, score: number) {
-    try {
-      await fetch("/api/results", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, score }),
-      });
-    } catch {
-      // silent
-    }
   }
 
   async function startBattle(choiceId: string) {
@@ -206,7 +169,10 @@ export default function SalesDojo() {
       setMessages(withReply);
       setGuard(r.guard ?? guard);
       if (r.status === "win" || r.status === "lose") {
-        await runScoring(withReply, r.status === "win" ? "クロージング成功でフィニッシュ!" : "お客さんが帰っちゃいました…");
+        await runScoring(
+          withReply,
+          r.status === "win" ? "クロージング成功でフィニッシュ!" : "お客さんが帰っちゃいました…"
+        );
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "通信エラー。もう一度送ってください。");
@@ -221,25 +187,21 @@ export default function SalesDojo() {
     setPhase("scoring");
     setEndedBy(reason);
     try {
-      const r = await callRoleplay({ type: "score", scenarioId: scenario, messages: msgs, endedBy: reason });
+      const meta = SCENARIOS.find((s) => s.id === scenario);
+      // メタ情報をリクエストに含め、サーバー側で DB 保存 → result_id を受け取る
+      const r = await callRoleplay({
+        type: "score",
+        scenarioId: scenario,
+        messages: msgs,
+        endedBy: reason,
+        staff_name: staffName.trim(),
+        scenario_label: meta?.label ?? scenario,
+        category: meta?.cat ?? "",
+        is_random: scenarioChoice === "random",
+      });
       setScoring(r);
+      setSavedResultId(r.result_id ?? null);
       setPhase("result");
-      if (staffName.trim()) {
-        const meta = SCENARIOS.find((s) => s.id === scenario);
-        const id = await saveResult({
-          staff_name: staffName.trim(),
-          scenario_id: scenario,
-          scenario_label: meta?.label || scenario,
-          category: meta?.cat || "",
-          is_random: scenarioChoice === "random",
-          score: r.score,
-          highlights: r.highlights || [],
-          deductions: r.deductions || [],
-          summary: r.summary || "",
-          transcript: msgs,
-        });
-        if (id) setSavedResultId(id);
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "採点に失敗しました。「採点をやりなおす」を押してください。");
       setPhase("result");
@@ -252,19 +214,18 @@ export default function SalesDojo() {
     setLoading(true);
     setError("");
     try {
+      // result_id をサーバーに渡し、反論成立時にサーバー側で DB 更新
       const r = await callRoleplay({
         type: "objection",
         scenarioId: scenario,
         messages,
+        result_id: savedResultId,
         scoring: { score: scoring.score, deductions: scoring.deductions },
         objection: objection.trim(),
       });
       setObjectionResult(r);
       if (r.accepted && typeof r.new_score === "number") {
         setScoring({ ...scoring, score: r.new_score });
-        if (savedResultId) {
-          await updateScore(savedResultId, r.new_score);
-        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "反論の判定に失敗しました。");
@@ -348,7 +309,9 @@ export default function SalesDojo() {
           <div className="p-3 mb-3" style={cardStyle({ borderRadius: 16 })}>
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-extrabold">
-                {scenarioChoice === "random" ? "🎲 予告なしランダム戦" : `${currentScenario?.emoji} ${currentScenario?.label}`}
+                {scenarioChoice === "random"
+                  ? "🎲 予告なしランダム戦"
+                  : `${currentScenario?.emoji} ${currentScenario?.label}`}
               </span>
               <button
                 onClick={() => runScoring(messages, "営業側の申告による打ち切り")}
@@ -438,7 +401,8 @@ export default function SalesDojo() {
             <div className="p-5" style={cardStyle({ borderRadius: 24 })}>
               <div className="text-center mb-2">
                 <div className="text-xs font-extrabold" style={{ color: C.gray }}>
-                  {scenarioChoice === "random" ? "🎲 出題されたのは… " : ""}{currentScenario?.emoji} {currentScenario?.label}
+                  {scenarioChoice === "random" ? "🎲 出題されたのは… " : ""}
+                  {currentScenario?.emoji} {currentScenario?.label}
                 </div>
                 <div className="text-xs font-bold mt-1" style={{ color: C.gray }}>{endedBy}</div>
               </div>
@@ -471,7 +435,6 @@ export default function SalesDojo() {
                 <p className="text-sm font-bold leading-relaxed">{scoring.summary}</p>
               </div>
 
-              {/* 反論 */}
               <div className="pt-2">
                 <h3 className="pop-display text-sm mb-1">⚖️ 採点にもの申す</h3>
                 <p className="text-[11px] font-bold mb-2" style={{ color: C.gray }}>営業判断としてロジックが通れば点数が動きます。言い訳はきゃっか!</p>
@@ -480,7 +443,9 @@ export default function SalesDojo() {
                     className="p-3 rounded-2xl text-sm font-bold"
                     style={{ background: objectionResult.accepted ? C.greenSoft : C.pinkSoft, border: `2px solid ${C.ink}` }}
                   >
-                    <span className="pop-display">{objectionResult.accepted ? `反論せいりつ!→ ${objectionResult.new_score}点` : "反論きゃっか"}</span><br />
+                    <span className="pop-display">
+                      {objectionResult.accepted ? `反論せいりつ!→ ${objectionResult.new_score}点` : "反論きゃっか"}
+                    </span><br />
                     {objectionResult.verdict}
                   </div>
                 ) : (

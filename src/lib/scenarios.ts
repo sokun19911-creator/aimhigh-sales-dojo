@@ -66,6 +66,9 @@ export const RUBRIC = `
 85点以上=トップクラス水準、75-84=上位、60-74=平均、60未満=要特訓。
 `;
 
+// scenarioId の許容値一覧 — Zod の z.enum に渡す
+export const SCENARIO_IDS = SCENARIOS.map((s) => s.id) as [string, ...string[]];
+
 export function transcriptText(messages: Array<{ role: string; text: string }>): string {
   return messages
     .map((m) => (m.role === "staff" ? `【営業】${m.text}` : `【客】${m.text}`))
