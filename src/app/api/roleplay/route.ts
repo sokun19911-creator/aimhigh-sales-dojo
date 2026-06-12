@@ -89,10 +89,10 @@ function extractJson(text: string): unknown {
   return JSON.parse(clean.slice(start, end + 1));
 }
 
-async function callRaw(prompt: string): Promise<unknown> {
+async function callRaw(prompt: string, maxTokens: number): Promise<unknown> {
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 1024,
+    max_tokens: maxTokens,
     messages: [{ role: "user", content: prompt }],
   });
   const text = response.content
@@ -102,18 +102,16 @@ async function callRaw(prompt: string): Promise<unknown> {
   return extractJson(text);
 }
 
-async function callClaude<T>(prompt: string, schema: z.ZodSchema<T>): Promise<T> {
+async function callClaude<T>(prompt: string, schema: z.ZodSchema<T>, maxTokens: number): Promise<T> {
   let raw: unknown;
   try {
-    raw = await callRaw(prompt);
+    raw = await callRaw(prompt, maxTokens);
   } catch {
-    // ネットワークやJSON解析エラー → 1回リトライ
-    raw = await callRaw(prompt);
+    raw = await callRaw(prompt, maxTokens);
   }
   const parsed = schema.safeParse(raw);
   if (parsed.success) return parsed.data;
-  // 形式不正 → 1回リトライ
-  const raw2 = await callRaw(prompt);
+  const raw2 = await callRaw(prompt, maxTokens);
   const parsed2 = schema.safeParse(raw2);
   if (parsed2.success) return parsed2.data;
   throw new Error(`AI response validation failed: ${parsed2.error.message}`);
@@ -162,21 +160,35 @@ export async function POST(req: NextRequest) {
       }
       const result = await callClaude(
         buildCustomerPrompt(data.scenarioId, data.messages),
-        CustomerResponseSchema
+        CustomerResponseSchema,
+        1024
       );
       return NextResponse.json(result);
     }
 
     // ── score ─────────────────────────────────────────────────────────────
     if (data.type === "score") {
-      const result = await callClaude(
-        buildScoringPrompt(data.scenarioId, data.messages, data.endedBy),
-        ScoringResponseSchema
-      );
+      let result: z.infer<typeof ScoringResponseSchema>;
+      let scoringFailed = false;
+      try {
+        result = await callClaude(
+          buildScoringPrompt(data.scenarioId, data.messages, data.endedBy),
+          ScoringResponseSchema,
+          3072
+        );
+      } catch {
+        scoringFailed = true;
+        result = {
+          score: 50,
+          highlights: [],
+          deductions: [],
+          summary: "採点の生成に失敗しました。もう一度お試しください。",
+        };
+      }
 
-      // サーバー側で直接 DB 保存 (High: /api/results POST を廃止)
+      // フォールバック時は DB 保存しない
       let result_id: string | null = null;
-      if (data.staff_name.trim()) {
+      if (!scoringFailed && data.staff_name.trim()) {
         const supabase = getServerSupabase();
         const { data: row, error } = await supabase
           .from("roleplay_results")
@@ -209,7 +221,8 @@ export async function POST(req: NextRequest) {
         data.scoring,
         data.objection
       ),
-      ObjectionResponseSchema
+      ObjectionResponseSchema,
+      3072
     );
 
     // 反論成立かつ result_id があればサーバー側でスコア更新
