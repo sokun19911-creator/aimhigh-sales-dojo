@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
-
-function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-}
+import { getServerSupabase } from "@/lib/supabase";
 
 const SaveSchema = z.object({
   staff_name: z.string().min(1).max(50),
@@ -44,7 +37,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "入力が不正です" }, { status: 400 });
   }
 
-  const { data, error } = await getSupabase()
+  const supabase = getServerSupabase();
+  const { data, error } = await supabase
     .from("roleplay_results")
     .insert(parsed.data)
     .select("id")
@@ -71,7 +65,8 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "入力が不正です" }, { status: 400 });
   }
 
-  const { error } = await getSupabase()
+  const supabase = getServerSupabase();
+  const { error } = await supabase
     .from("roleplay_results")
     .update({ score: parsed.data.score })
     .eq("id", parsed.data.id);
