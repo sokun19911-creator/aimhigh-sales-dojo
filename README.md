@@ -1,36 +1,102 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 営業道場 — AimHigh 携帯販売営業ロープレ研修ツール
 
-## Getting Started
+AIがお客さんを演じる携帯販売スタッフ向け研修ツールです。  
+ロープレ終了後にルーブリックで自動採点、管理者は全スタッフの成績を閲覧できます。
 
-First, run the development server:
+## 機能
+
+- **11種のシナリオ** (きほん / MNP特化 / 新規特化 / コンプラ・トラブル)
+- **客役AI** — `claude-sonnet-4-6` が警戒度を持つリアルな客を演じる
+- **自動採点** — 100点満点のルーブリックで忖度なし採点
+- **反論機能** — 論理的な反論には点数が動く
+- **管理者ダッシュボード** — 全スタッフの成績・会話ログ・採点詳細を閲覧
+
+## セットアップ
+
+### 1. 環境変数の設定
+
+`.env.example` をコピーして `.env.local` を作成し、各値を入力：
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| 変数 | 説明 |
+|------|------|
+| `ANTHROPIC_API_KEY` | Anthropic API キー |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase プロジェクト URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+| `ADMIN_PASSWORD` | 管理者ページのパスワード |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 2. Supabase テーブル作成
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Supabase の SQL Editor で以下を実行：
 
-## Learn More
+```sql
+create table public.roleplay_results (
+  id uuid primary key default gen_random_uuid(),
+  staff_name text not null,
+  scenario_id text not null,
+  scenario_label text not null,
+  category text not null,
+  is_random boolean not null default false,
+  score integer not null check (score >= 0 and score <= 100),
+  highlights jsonb not null default '[]',
+  deductions jsonb not null default '[]',
+  summary text not null default '',
+  transcript jsonb not null default '[]',
+  created_at timestamptz not null default now()
+);
 
-To learn more about Next.js, take a look at the following resources:
+-- anon ユーザーに読み書き許可
+alter table public.roleplay_results enable row level security;
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+create policy "allow_insert" on public.roleplay_results
+  for insert to anon with check (true);
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+create policy "allow_select" on public.roleplay_results
+  for select to anon using (true);
 
-## Deploy on Vercel
+create policy "allow_update" on public.roleplay_results
+  for update to anon using (true);
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 3. ローカル起動
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm install
+npm run dev
+```
+
+## Vercel デプロイ手順
+
+1. [Vercel](https://vercel.com/) にサインイン
+2. 「New Project」→ このリポジトリをインポート
+3. **Environment Variables** に以下を追加：
+   - `ANTHROPIC_API_KEY`
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `ADMIN_PASSWORD`
+4. 「Deploy」をクリック
+
+## ページ構成
+
+| URL | 説明 |
+|-----|------|
+| `/` | ロープレ本体 (スタッフ用) |
+| `/admin` | 管理者ダッシュボード (パスワード認証) |
+
+## 技術スタック
+
+- **Next.js** (App Router) + TypeScript + Tailwind CSS
+- **Anthropic API** — claude-sonnet-4-6
+- **Supabase** — PostgreSQL
+- **Vercel** — ホスティング
+
+## セキュリティ
+
+- `ANTHROPIC_API_KEY` はサーバーサイドのみで使用（クライアントに露出しない）
+- AI 呼び出しはすべて `/api/roleplay` Route Handler 経由
+- Zod による入力バリデーション
+- IP ベースの簡易レート制限（60秒で最大20リクエスト）
+- max_tokens: 1024 に制限、15往復で強制採点
