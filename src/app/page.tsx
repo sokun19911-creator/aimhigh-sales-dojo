@@ -56,8 +56,8 @@ function GuardGauge({ value }: { value: number }) {
 }
 
 function ScoreBadge({ score }: { score: number }) {
-  const main = score >= 85 ? C.pink : score >= 75 ? C.gold : score >= 60 ? C.sky : C.gray;
-  const stars = score >= 85 ? "⭐⭐⭐" : score >= 75 ? "⭐⭐" : score >= 60 ? "⭐" : "🌱";
+  const main = score >= 85 ? C.pink : score >= 65 ? C.gold : score >= 50 ? C.sky : C.gray;
+  const stars = score >= 85 ? "⭐⭐⭐" : score >= 65 ? "⭐⭐" : score >= 50 ? "⭐" : "🌱";
   return (
     <div
       className="pop-in mx-auto flex flex-col items-center justify-center rounded-full"
@@ -407,8 +407,8 @@ export default function SalesDojo() {
                 <div className="text-xs font-bold mt-1" style={{ color: C.gray }}>{endedBy}</div>
               </div>
               <div className="my-5"><ScoreBadge score={scoring.score} /></div>
-              <div className="text-center pop-display text-base mb-5" style={{ color: scoring.score >= 85 ? C.pink : scoring.score >= 75 ? C.gold : C.gray }}>
-                {scoring.score >= 85 ? "トップクラス級!すごい!" : scoring.score >= 75 ? "上位ライン!あと一歩!" : scoring.score >= 60 ? "へいきん圏。のびしろ十分!" : "要特訓!ここから始まる!"}
+              <div className="text-center pop-display text-base mb-5" style={{ color: scoring.score >= 85 ? C.pink : scoring.score >= 65 ? C.gold : scoring.score >= 50 ? C.sky : C.gray }}>
+                {scoring.score >= 85 ? "達人級!めったに出ない!" : scoring.score >= 65 ? "上位ライン!型が出てる!" : scoring.score >= 50 ? "平均圏。型を磨こう。" : "🔥 猛特訓!ここから鍛える!"}
               </div>
 
               <div className="p-3 mb-3 rounded-2xl" style={{ background: C.greenSoft, border: `2px solid ${C.ink}` }}>
